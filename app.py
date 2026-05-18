@@ -242,14 +242,20 @@ def main() -> None:
         with st.spinner(f"Scanning {len(tickers)} tickers... this may take a few moments."):
             result_df = scan_tickers(tickers, target_delta, max_dte, min_dte)
 
-        if result_df.empty:
+        candidate_df = result_df.copy()
+        missing = None
+        if "status" in candidate_df.columns:
+            missing = candidate_df[candidate_df["status"].notna()][["ticker", "status"]]
+            candidate_df = candidate_df[candidate_df["status"].isna()].drop(columns=["status"])
+
+        if candidate_df.empty or "price" not in candidate_df.columns:
             st.error("No valid cash secured put candidates found. Try widening the DTE range or checking tickers.")
+            if show_all and missing is not None and not missing.empty:
+                st.warning("Some tickers did not return a valid candidate:")
+                st.table(missing)
             return
 
-        display_df = result_df.copy()
-        if "status" in display_df.columns:
-            display_df = display_df.drop(columns=[col for col in ["status"] if col in display_df.columns])
-
+        display_df = candidate_df.copy()
         display_df["price"] = display_df["price"].apply(format_currency)
         display_df["stock_price"] = display_df["stock_price"].apply(format_currency)
         display_df["strike"] = display_df["strike"].apply(format_currency)
@@ -283,11 +289,9 @@ def main() -> None:
             ].head(20),
             use_container_width=True,
         )
-        if show_all and "status" in result_df.columns:
-            missing = result_df[result_df["status"].notna()][["ticker", "status"]]
-            if not missing.empty:
-                st.warning("Some tickers did not return a valid candidate:")
-                st.table(missing)
+        if show_all and missing is not None and not missing.empty:
+            st.warning("Some tickers did not return a valid candidate:")
+            st.table(missing)
 
 if __name__ == "__main__":
     main()
