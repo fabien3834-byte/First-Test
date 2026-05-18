@@ -1,0 +1,1 @@
+I want to build a visual application to find good US Market options entry prices. I just need to find best ROI options for Cash secured puts, around -0,15 delta, max 40 DTE. I am just allowed to trade on around 20 tickers, I can give you the list. Data source could be yahoo finance web scraping.
