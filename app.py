@@ -37,8 +37,7 @@ def _bs_put_delta(S: float, K: float, T: float, r: float, sigma: float) -> float
     return _normal_cdf(d1) - 1.0
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch_option_metadata(ticker: str) -> Optional[Dict]:
+def fetch_option_metadata_uncached(ticker: str) -> Optional[Dict]:
     try:
         stock = yf.Ticker(ticker)
         history = stock.history(period="70d")
@@ -67,7 +66,11 @@ def fetch_option_metadata(ticker: str) -> Optional[Dict]:
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_option_chain(ticker: str, expiration: str) -> Optional[pd.DataFrame]:
+def fetch_option_metadata(ticker: str) -> Optional[Dict]:
+    return fetch_option_metadata_uncached(ticker)
+
+
+def fetch_option_chain_uncached(ticker: str, expiration: str) -> Optional[pd.DataFrame]:
     try:
         stock = yf.Ticker(ticker)
         chain = stock.option_chain(expiration)
@@ -76,14 +79,23 @@ def fetch_option_chain(ticker: str, expiration: str) -> Optional[pd.DataFrame]:
         return None
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_option_chain(ticker: str, expiration: str) -> Optional[pd.DataFrame]:
+    return fetch_option_chain_uncached(ticker, expiration)
+
+
 def build_candidates(
     ticker: str,
     target_delta: float,
     max_dte: int,
     min_dte: int,
     max_candidates: int = 3,
+    use_cache: bool = True,
 ) -> List[Dict]:
-    metadata = fetch_option_metadata(ticker)
+    if use_cache:
+        metadata = fetch_option_metadata(ticker)
+    else:
+        metadata = fetch_option_metadata_uncached(ticker)
     if metadata is None or metadata["expirations"] is None:
         return []
 
@@ -101,11 +113,14 @@ def build_candidates(
         except ValueError:
             continue
 
-        dte = max((exp_date - now).days, 0)
+        dte = max((exp_date - now).days + 1, 0)
         if dte < min_dte or dte > max_dte:
             continue
 
-        puts = fetch_option_chain(ticker, expiration)
+        if use_cache:
+            puts = fetch_option_chain(ticker, expiration)
+        else:
+            puts = fetch_option_chain_uncached(ticker, expiration)
         if puts is None or puts.empty:
             continue
 
@@ -152,6 +167,8 @@ def build_candidates(
         bid = float(best["bid"])
         mid = float(best["mid"] if not np.isnan(best["mid"]) else bid)
         roi = bid / strike * 100
+        annualized_roi = (roi * 365.0 / dte) if dte > 0 else np.nan
+        strike_diff_pct = ((strike - price) / price * 100) if price > 0 else np.nan
         prob_otm = round(1.0 - abs(best["delta"]), 4)
         option_volume_raw = best.get("volume", 0)
         if pd.isna(option_volume_raw):
@@ -170,12 +187,14 @@ def build_candidates(
                 "expiration": expiration,
                 "dte": dte,
                 "strike": strike,
+                "strike_diff_pct": strike_diff_pct,
                 "bid": bid,
                 "ask": float(best["ask"]),
                 "mid": mid,
                 "volume": option_volume,
                 "delta": float(best["delta"]),
                 "roi_pct": roi,
+                "annualized_roi_pct": annualized_roi,
                 "prob_otm": prob_otm,
                 "delta_gap": float(best["delta_diff"]),
                 "day_change_pct": metadata.get("day_change_pct", 0.0),
@@ -186,7 +205,7 @@ def build_candidates(
         if len(candidates) >= max_candidates:
             break
 
-    return sorted(candidates, key=lambda row: row["roi_pct"], reverse=True)
+    return sorted(candidates, key=lambda row: row["annualized_roi_pct"], reverse=True)
 
 
 def scan_tickers(
@@ -194,18 +213,19 @@ def scan_tickers(
     target_delta: float,
     max_dte: int,
     min_dte: int,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     rows: List[Dict] = []
     for ticker in tickers:
-        candidates = build_candidates(ticker, target_delta, max_dte, min_dte)
+        candidates = build_candidates(ticker, target_delta, max_dte, min_dte, use_cache=use_cache)
         if not candidates:
             rows.append({"ticker": ticker, "status": "no options found or data unavailable"})
             continue
         rows.extend(candidates)
 
     df = pd.DataFrame(rows)
-    if not df.empty and "roi_pct" in df.columns:
-        df = df.sort_values(by="roi_pct", ascending=False).reset_index(drop=True)
+    if not df.empty and "annualized_roi_pct" in df.columns:
+        df = df.sort_values(by="annualized_roi_pct", ascending=False).reset_index(drop=True)
     return df
 
 
@@ -223,14 +243,15 @@ def main() -> None:
         st.header("Scanner Settings")
         ticker_text = st.text_area(
             "Tickers (comma or space separated)",
-            value="SOXL, DRAM, MSOS, IBIT, URA, UNG, ARKK, UVIX, IGV, UVXY, SLV, GDX, KWEB, SVIX, EFA, JETS",
-            height=140,
+            value="SOXL, DRAM, MSOS, IBIT, URA, UNG, ARKK, UVIX, IGV, UVXY, SLV, GDX, KWEB, SVIX, EFA, JETS, XBI, TNA, XLF, XLE, XLY, XLC, XLI, XLB, XLV, XLU, XME, XOP, XRT, XSD, XAR, XHB, XTL, XHE, XPH, XSW, XTL, XHE, XPH, XSW",
+            height=180,
         )
-        target_delta = st.slider("Target absolute put delta", min_value=0.05, max_value=0.35, value=0.15, step=0.01)
-        max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=40, step=1)
-        min_dte = st.slider("Min days to expiration", min_value=0, max_value=30, value=0, step=1)
+        target_delta = st.slider("Target absolute put delta", min_value=0.05, max_value=0.35, value=0.12, step=0.01)
+        max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=30, step=1)
+        min_dte = st.slider("Min days to expiration", min_value=0, max_value=30, value=2, step=1)
         show_all = st.checkbox("Show all tickers even when no candidate found", value=True)
         run_scan = st.button("Scan Options")
+        run_scan_nocache = st.button("Scan Options without cache")
 
     tickers = parse_tickers(ticker_text)
 
@@ -238,9 +259,10 @@ def main() -> None:
         st.warning("Enter at least one ticker symbol to begin scanning.")
         return
 
-    if run_scan:
+    if run_scan or run_scan_nocache:
+        use_cache = not run_scan_nocache
         with st.spinner(f"Scanning {len(tickers)} tickers... this may take a few moments."):
-            result_df = scan_tickers(tickers, target_delta, max_dte, min_dte)
+            result_df = scan_tickers(tickers, target_delta, max_dte, min_dte, use_cache=use_cache)
 
         candidate_df = result_df.copy()
         missing = None
@@ -263,6 +285,8 @@ def main() -> None:
         display_df["ask"] = display_df["ask"].apply(format_currency)
         display_df["mid"] = display_df["mid"].apply(format_currency)
         display_df["roi_pct"] = display_df["roi_pct"].map(lambda v: f"{v:.2f}%")
+        display_df["annualized_roi_pct"] = display_df["annualized_roi_pct"].map(lambda v: f"{v:.2f}%" if pd.notna(v) else "N/A")
+        display_df["strike_diff_pct"] = display_df["strike_diff_pct"].map(lambda v: f"{v:.2f}%" if pd.notna(v) else "N/A")
         display_df["prob_otm"] = display_df["prob_otm"].map(lambda v: f"{v:.1%}")
         display_df["delta"] = display_df["delta"].map(lambda v: f"{v:.2f}")
         display_df["day_change_pct"] = display_df["day_change_pct"].map(lambda v: f"{v:.2f}%")
@@ -276,17 +300,19 @@ def main() -> None:
                     "dte",
                     "stock_price",
                     "strike",
+                    "strike_diff_pct",
                     "bid",
                     "ask",
                     "mid",
                     "volume",
                     "delta",
                     "roi_pct",
+                    "annualized_roi_pct",
                     "prob_otm",
                     "day_change_pct",
                     "range_52d",
                 ]
-            ].head(20),
+            ].head(50),
             use_container_width=True,
         )
         if show_all and missing is not None and not missing.empty:
