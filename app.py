@@ -86,7 +86,8 @@ def fetch_option_chain(ticker: str, expiration: str) -> Optional[pd.DataFrame]:
 
 def build_candidates(
     ticker: str,
-    target_delta: float,
+    delta_min: float,
+    delta_max: float,
     max_dte: int,
     min_dte: int,
     max_candidates: int = 3,
@@ -103,7 +104,11 @@ def build_candidates(
     if np.isnan(price) or price <= 0:
         return []
 
-    target_delta = -abs(target_delta)
+    delta_min = abs(delta_min)
+    delta_max = abs(delta_max)
+    if delta_min > delta_max:
+        delta_min, delta_max = delta_max, delta_min
+    delta_mid = (delta_min + delta_max) / 2.0
     now = datetime.now()
     candidates: List[Dict] = []
 
@@ -155,9 +160,14 @@ def build_candidates(
         if puts.empty:
             continue
 
-        puts["delta_diff"] = (puts["delta"] - target_delta).abs()
+        puts = puts[puts["delta"].abs().between(delta_min, delta_max)]
+        if puts.empty:
+            continue
+
+        puts["roi_pct"] = puts["bid"] / puts["strike"] * 100.0
+        puts["delta_diff"] = (puts["delta"].abs() - delta_mid).abs()
         puts["strike_below_price"] = puts["strike"] <= price
-        puts = puts.sort_values(by=["delta_diff", "strike_below_price"], ascending=[True, False])
+        puts = puts.sort_values(by=["roi_pct", "delta_diff", "strike_below_price"], ascending=[False, True, False])
         best = puts.iloc[0]
 
         if best["bid"] <= 0 or best["strike"] <= 0:
@@ -210,14 +220,15 @@ def build_candidates(
 
 def scan_tickers(
     tickers: List[str],
-    target_delta: float,
+    delta_min: float,
+    delta_max: float,
     max_dte: int,
     min_dte: int,
     use_cache: bool = True,
 ) -> pd.DataFrame:
     rows: List[Dict] = []
     for ticker in tickers:
-        candidates = build_candidates(ticker, target_delta, max_dte, min_dte, use_cache=use_cache)
+        candidates = build_candidates(ticker, delta_min, delta_max, max_dte, min_dte, use_cache=use_cache)
         if not candidates:
             rows.append({"ticker": ticker, "status": "no options found or data unavailable"})
             continue
@@ -246,7 +257,13 @@ def main() -> None:
             value="SOXL, DRAM, MSOS, IBIT, URA, UNG, ARKK, UVIX, IGV, UVXY, SLV, GDX, KWEB, SVIX, EFA, JETS, XBI, TNA, XLF, XLE, XLY, XLC, XLI, XLB, XLV, XLU, XME, XOP, XRT, XSD, XAR, XHB, XTL, XHE, XPH, XSW, XTL, XHE, XPH, XSW",
             height=180,
         )
-        target_delta = st.slider("Target absolute put delta", min_value=0.05, max_value=0.35, value=0.12, step=0.01)
+        target_delta_range = st.slider(
+            "Target absolute put delta range",
+            min_value=0.0,
+            max_value=0.4,
+            value=(0.05, 0.25),
+            step=0.01,
+        )
         max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=30, step=1)
         min_dte = st.slider("Min days to expiration", min_value=0, max_value=30, value=2, step=1)
         show_all = st.checkbox("Show all tickers even when no candidate found", value=True)
@@ -262,7 +279,14 @@ def main() -> None:
     if run_scan or run_scan_nocache:
         use_cache = not run_scan_nocache
         with st.spinner(f"Scanning {len(tickers)} tickers... this may take a few moments."):
-            result_df = scan_tickers(tickers, target_delta, max_dte, min_dte, use_cache=use_cache)
+            result_df = scan_tickers(
+                tickers,
+                target_delta_range[0],
+                target_delta_range[1],
+                max_dte,
+                min_dte,
+                use_cache=use_cache,
+            )
 
         candidate_df = result_df.copy()
         missing = None
