@@ -59,6 +59,8 @@ def fetch_option_metadata_uncached(ticker: str) -> Optional[Dict]:
             "price": last_price,
             "expirations": expirations,
             "day_change_pct": day_change_pct,
+            "low_52": low_52,
+            "high_52": high_52,
             "range_52d": range_52d,
         }
     except Exception:
@@ -179,7 +181,7 @@ def build_candidates(
         roi = bid / strike * 100
         annualized_roi = (roi * 365.0 / dte) if dte > 0 else np.nan
         strike_diff_pct = ((strike - price) / price * 100) if price > 0 else np.nan
-        prob_otm = round(1.0 - abs(best["delta"]), 4)
+        #prob_otm = round(1.0 - abs(best["delta"]), 4)
         option_volume_raw = best.get("volume", 0)
         if pd.isna(option_volume_raw):
             option_volume = 0
@@ -189,11 +191,14 @@ def build_candidates(
             except (TypeError, ValueError):
                 option_volume = 0
 
+        price_range = format_price_range(price, metadata.get("low_52"), metadata.get("high_52"))
+
         candidates.append(
             {
                 "ticker": ticker,
                 "price": price,
                 "stock_price": price,
+                "price_range": price_range,
                 "expiration": expiration,
                 "dte": dte,
                 "strike": strike,
@@ -205,7 +210,7 @@ def build_candidates(
                 "delta": float(best["delta"]),
                 "roi_pct": roi,
                 "annualized_roi_pct": annualized_roi,
-                "prob_otm": prob_otm,
+        #        "prob_otm": prob_otm,
                 "delta_gap": float(best["delta_diff"]),
                 "day_change_pct": metadata.get("day_change_pct", 0.0),
                 "range_52d": metadata.get("range_52d", "N/A"),
@@ -244,6 +249,23 @@ def format_currency(value: float) -> str:
     return f"${value:,.2f}"
 
 
+def format_price_range(price: float, low_52: Optional[float], high_52: Optional[float], width: int = 12) -> str:
+    if low_52 is None or high_52 is None or high_52 <= low_52:
+        low_label = format_currency(low_52) if low_52 is not None else "N/A"
+        high_label = format_currency(high_52) if high_52 is not None else "N/A"
+        return f"{format_currency(price)} ({low_label} - {high_label})"
+
+    ratio = max(0.0, min((price - low_52) / (high_52 - low_52), 1.0))
+    marker_index = int(round(ratio * (width - 1)))
+    bar = "─" * width
+    bar = bar[:marker_index] + "█" + bar[marker_index + 1:]
+    return f"{format_currency(price)} [{bar}] {format_currency(low_52)} / {format_currency(high_52)}"
+
+
+CURATED_TICKERS = "SOXL, DRAM, MSOS, IBIT, TQQQ, URA, UNG, ARKK, ARKG, UVIX, IGV, UVXY, SLV, KWEB, JETS, GDX, EWY"
+EXTENDED_TICKERS = "SOXL, DRAM, MSOS, IBIT, TQQQ, TLT, USO, EEM, URA, UNG, BOIL, ARKK, ARKG, TMF, UCO, YINN, UPRO, UVIX, IGV, UVXY, SLV, AGQ, GDX, SOXS, KRE, KWEB, SVIX, EFA, EWZ, EWY, SILJ, SCO, FXI, SQQQ, JETS, RSP, FEZ, COPX, EWJ, IAU, FBTC, SPXU, WEAT, GDXJ, KOLD, SCHD, BNO, XLP, XBI, TNA, XLF, XLE, XLK, XLC, XLI, XLB, XLV, XLU, XLY, XME, XOP, XRT, XSD, XAR, XHB, XTL, XHE, XPH, XSW"
+
+
 def main() -> None:
     st.title("Cash Secured Put Options Scanner")
     st.write(
@@ -252,19 +274,26 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Scanner Settings")
+        ticker_list_option = st.radio(
+            "Select ticker list",
+            options=["Curated", "Extended"],
+            index=0,
+            horizontal=True,
+        )
+        default_tickers = CURATED_TICKERS if ticker_list_option == "Curated" else EXTENDED_TICKERS
         ticker_text = st.text_area(
             "Tickers (comma or space separated)",
-            value="SOXL, DRAM, MSOS, IBIT, URA, UNG, ARKK, UVIX, IGV, UVXY, SLV, GDX, KWEB, SVIX, EFA, JETS, XBI, TNA, XLF, XLE, XLY, XLC, XLI, XLB, XLV, XLU, XME, XOP, XRT, XSD, XAR, XHB, XTL, XHE, XPH, XSW, XTL, XHE, XPH, XSW",
+            value=default_tickers,
             height=180,
         )
         target_delta_range = st.slider(
             "Target absolute put delta range",
             min_value=0.0,
             max_value=0.4,
-            value=(0.05, 0.25),
+            value=(0.03, 0.12),
             step=0.01,
         )
-        max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=30, step=1)
+        max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=20, step=1)
         min_dte = st.slider("Min days to expiration", min_value=0, max_value=30, value=2, step=1)
         show_all = st.checkbox("Show all tickers even when no candidate found", value=True)
         run_scan = st.button("Scan Options")
@@ -302,16 +331,16 @@ def main() -> None:
             return
 
         display_df = candidate_df.copy()
+        display_df = display_df[display_df["annualized_roi_pct"] > 18]
         display_df["price"] = display_df["price"].apply(format_currency)
-        display_df["stock_price"] = display_df["stock_price"].apply(format_currency)
         display_df["strike"] = display_df["strike"].apply(format_currency)
         display_df["bid"] = display_df["bid"].apply(format_currency)
         display_df["ask"] = display_df["ask"].apply(format_currency)
         display_df["mid"] = display_df["mid"].apply(format_currency)
         display_df["roi_pct"] = display_df["roi_pct"].map(lambda v: f"{v:.2f}%")
-        display_df["annualized_roi_pct"] = display_df["annualized_roi_pct"].map(lambda v: f"{v:.2f}%" if pd.notna(v) else "N/A")
+        display_df["a_roi_pct"] = display_df["annualized_roi_pct"].map(lambda v: f"{v:.2f}%" if pd.notna(v) else "N/A")
         display_df["strike_diff_pct"] = display_df["strike_diff_pct"].map(lambda v: f"{v:.2f}%" if pd.notna(v) else "N/A")
-        display_df["prob_otm"] = display_df["prob_otm"].map(lambda v: f"{v:.1%}")
+        #display_df["prob_otm"] = display_df["prob_otm"].map(lambda v: f"{v:.1%}")
         display_df["delta"] = display_df["delta"].map(lambda v: f"{v:.2f}")
         display_df["day_change_pct"] = display_df["day_change_pct"].map(lambda v: f"{v:.2f}%")
 
@@ -322,7 +351,7 @@ def main() -> None:
                     "ticker",
                     "expiration",
                     "dte",
-                    "stock_price",
+                    "price_range",
                     "strike",
                     "strike_diff_pct",
                     "bid",
@@ -331,13 +360,13 @@ def main() -> None:
                     "volume",
                     "delta",
                     "roi_pct",
-                    "annualized_roi_pct",
-                    "prob_otm",
+                    "a_roi_pct",
+         #           "prob_otm",
                     "day_change_pct",
-                    "range_52d",
                 ]
-            ].head(50),
+            ],
             use_container_width=True,
+            height=600,
         )
         if show_all and missing is not None and not missing.empty:
             st.warning("Some tickers did not return a valid candidate:")
