@@ -262,8 +262,89 @@ def format_price_range(price: float, low_52: Optional[float], high_52: Optional[
     return f"{format_currency(price)} [{bar}] {format_currency(low_52)} / {format_currency(high_52)}"
 
 
-CURATED_TICKERS = "SOXL, DRAM, MSOS, IBIT, TQQQ, URA, UNG, ARKK, ARKG, UVIX, IGV, UVXY, SLV, KWEB, JETS, GDX, EWY"
+CURATED_TICKERS = "SOXL, DRAM, MSOS, IBIT, TQQQ, URA, UNG, ARKK, ARKG, UVIX, IGV, UVXY, SLV, KWEB, JETS, GDX, EWY, YINN"
 EXTENDED_TICKERS = "SOXL, DRAM, MSOS, IBIT, TQQQ, TLT, USO, EEM, URA, UNG, BOIL, ARKK, ARKG, TMF, UCO, YINN, UPRO, UVIX, IGV, UVXY, SLV, AGQ, GDX, SOXS, KRE, KWEB, SVIX, EFA, EWZ, EWY, SILJ, SCO, FXI, SQQQ, JETS, RSP, FEZ, COPX, EWJ, IAU, FBTC, SPXU, WEAT, GDXJ, KOLD, SCHD, BNO, XLP, XBI, TNA, XLF, XLE, XLK, XLC, XLI, XLB, XLV, XLU, XLY, XME, XOP, XRT, XSD, XAR, XHB, XTL, XHE, XPH, XSW"
+
+TICKER_DESCRIPTIONS = {
+    "SOXL": "Semiconductor Bull 3X",
+    "DRAM": "Micron Technology ADR",
+    "MSOS": "MicroSectors 5G ETF",
+    "IBIT": "Innovation Shares Bitcoin ETF",
+    "TQQQ": "Nasdaq-100 Bull 3X",
+    "URA": "Global Uranium ETF",
+    "UNG": "Natural Gas ETF",
+    "ARKK": "ARK Innovation ETF",
+    "ARKG": "ARK Genomic Revolution ETF",
+    "UVIX": "Volatility Short-Term Futures ETF",
+    "IGV": "Software ETF",
+    "UVXY": "Volatility Short-Term Futures ETF",
+    "SLV": "Silver Trust",
+    "KWEB": "China Internet ETF",
+    "JETS": "Airline ETF",
+    "GDX": "Gold Miners ETF",
+    "EWY": "South Korea ETF",
+    "TLT": "20+ Year Treasury Bond ETF",
+    "USO": "United States Oil Fund",
+    "EEM": "Emerging Markets ETF",
+    "BOIL": "Natural Gas Bull 2X ETF",
+    "TMF": "20+ Year Treasury Bull 3X",
+    "UCO": "Crude Oil Bull 2X ETF",
+    "YINN": "China Bull 3X ETF",
+    "UPRO": "S&P 500 Bull 3X ETF",
+    "AGQ": "Silver Bull 2X ETF",
+    "SOXS": "Semiconductor Bear 3X ETF",
+    "KRE": "Regional Banking ETF",
+    "SVIX": "Inverse VIX Short-Term ETN",
+    "EFA": "International Developed Markets ETF",
+    "EWZ": "Brazil ETF",
+    "SILJ": "Junior Silver Miners ETF",
+    "SCO": "Crude Oil Bear 2X ETF",
+    "FXI": "China Large-Cap ETF",
+    "SQQQ": "Nasdaq-100 Short 3X ETF",
+    "RSP": "S&P 500 Equal Weight ETF",
+    "FEZ": "Euro Stoxx 50 ETF",
+    "COPX": "Copper Miners ETF",
+    "EWJ": "Japan ETF",
+    "IAU": "Gold Trust",
+    "FBTC": "Bitcoin ETF",
+    "SPXU": "S&P 500 Short 3X ETF",
+    "WEAT": "Wheat Fund",
+    "GDXJ": "Junior Gold Miners ETF",
+    "KOLD": "Natural Gas Bear 2X ETF",
+    "SCHD": "U.S. Dividend Equity ETF",
+    "BNO": "Brent Oil Fund",
+    "XLP": "Consumer Staples ETF",
+    "XBI": "Biotech ETF",
+    "TNA": "Small Cap Bull 3X ETF",
+    "XLF": "Financials ETF",
+    "XLE": "Energy ETF",
+    "XLK": "Technology ETF",
+    "XLC": "Communication Services ETF",
+    "XLI": "Industrials ETF",
+    "XLB": "Materials ETF",
+    "XLV": "Health Care ETF",
+    "XLU": "Utilities ETF",
+    "XLY": "Consumer Discretionary ETF",
+    "XME": "Metals & Mining ETF",
+    "XOP": "Oil & Gas Exploration ETF",
+    "XRT": "Retail ETF",
+    "XSD": "Semiconductor ETF",
+    "XAR": "Aerospace & Defense ETF",
+    "XHB": "Homebuilders ETF",
+    "XTL": "Telecom ETF",
+    "XHE": "Health Care Equipment ETF",
+    "XPH": "Pharmaceuticals ETF",
+    "XSW": "Software & Services ETF",
+}
+
+
+def get_ticker_description(ticker: str) -> str:
+    return TICKER_DESCRIPTIONS.get(ticker, "No description available")
+
+
+def ticker_cell_html(ticker: str) -> str:
+    description = get_ticker_description(ticker)
+    return f'<span title="{description}">{ticker}</span>'
 
 
 def main() -> None:
@@ -290,11 +371,37 @@ def main() -> None:
             "Target absolute put delta range",
             min_value=0.0,
             max_value=0.4,
-            value=(0.03, 0.12),
+            value=(0.03, 0.15),
             step=0.01,
         )
-        max_dte = st.slider("Max days to expiration", min_value=10, max_value=40, value=20, step=1)
-        min_dte = st.slider("Min days to expiration", min_value=0, max_value=30, value=2, step=1)
+        dte_range = st.slider(
+            "Days to expiration range",
+            min_value=0,
+            max_value=40,
+            value=(2, 20),
+            step=1,
+        )
+        strike_range = st.slider(
+            "Strike price range",
+            min_value=0,
+            max_value=300,
+            value=(3, 250),
+            step=1,
+        )
+        min_mid = st.slider(
+            "Minimum option mid price",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.2,
+            step=0.1,
+        )
+        min_volume = st.slider(
+            "Minimum option volume",
+            min_value=0,
+            max_value=100,
+            value=5,
+            step=5,
+        )
         show_all = st.checkbox("Show all tickers even when no candidate found", value=True)
         run_scan = st.button("Scan Options")
         run_scan_nocache = st.button("Scan Options without cache")
@@ -312,8 +419,8 @@ def main() -> None:
                 tickers,
                 target_delta_range[0],
                 target_delta_range[1],
-                max_dte,
-                min_dte,
+                dte_range[1],
+                dte_range[0],
                 use_cache=use_cache,
             )
 
@@ -323,8 +430,16 @@ def main() -> None:
             missing = candidate_df[candidate_df["status"].notna()][["ticker", "status"]]
             candidate_df = candidate_df[candidate_df["status"].isna()].drop(columns=["status"])
 
+        if not candidate_df.empty:
+            candidate_df = candidate_df[
+                (candidate_df["strike"] >= strike_range[0])
+                & (candidate_df["strike"] <= strike_range[1])
+                & (candidate_df["mid"] >= float(min_mid))
+                & (candidate_df["volume"] >= int(min_volume))
+            ]
+
         if candidate_df.empty or "price" not in candidate_df.columns:
-            st.error("No valid cash secured put candidates found. Try widening the DTE range or checking tickers.")
+            st.error("No valid cash secured put candidates found. Try widening the DTE range, widening the strike bounds, or checking tickers.")
             if show_all and missing is not None and not missing.empty:
                 st.warning("Some tickers did not return a valid candidate:")
                 st.table(missing)
@@ -332,6 +447,7 @@ def main() -> None:
 
         display_df = candidate_df.copy()
         display_df = display_df[display_df["annualized_roi_pct"] > 18]
+        display_df["ticker"] = display_df["ticker"].apply(ticker_cell_html)
         display_df["price"] = display_df["price"].apply(format_currency)
         display_df["strike"] = display_df["strike"].apply(format_currency)
         display_df["bid"] = display_df["bid"].apply(format_currency)
@@ -345,7 +461,7 @@ def main() -> None:
         display_df["day_change_pct"] = display_df["day_change_pct"].map(lambda v: f"{v:.2f}%")
 
         st.subheader("Top Cash Secured Put Candidates")
-        st.dataframe(
+        st.markdown(
             display_df[
                 [
                     "ticker",
@@ -364,9 +480,8 @@ def main() -> None:
          #           "prob_otm",
                     "day_change_pct",
                 ]
-            ],
-            use_container_width=True,
-            height=600,
+            ].to_html(index=False, escape=False),
+            unsafe_allow_html=True,
         )
         if show_all and missing is not None and not missing.empty:
             st.warning("Some tickers did not return a valid candidate:")
